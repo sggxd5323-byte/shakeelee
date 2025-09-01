@@ -1,14 +1,14 @@
-// AIService.ts
+// Enhanced AIService with proper integration
 export interface AIMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
-  image?: string; // optional uploaded image URL
+  image?: string;
 }
 
 export interface AIResponse {
   content: string;
   model: string;
-  imageUrl?: string; // generated image URL
+  imageUrl?: string;
 }
 
 export class AIService {
@@ -16,92 +16,203 @@ export class AIService {
   private baseUrl = "https://openrouter.ai/api/v1";
 
   private models = {
-    image: "google/gemini-2.5-flash-image-preview:free",
-    general: "openai/gpt-3.5-turbo"
+    auto: "qwen/qwen-2.5-72b-instruct:free",
+    code: "deepseek/deepseek-coder",
+    creative: "anthropic/claude-3-haiku",
+    knowledge: "google/gemini-2.5-flash-image-preview:free",
+    general: "qwen/qwen-2.5-72b-instruct:free",
+    image: "google/gemini-2.5-flash-image-preview:free"
   };
 
-  // Local spell/grammar fixes
-  private localSpellFix(text: string): string {
+  // Enhanced spell checker with better corrections
+  private enhancedSpellCheck(text: string): string {
     if (!text) return "";
-    let corrected = text
-      .replace(/\bi\b/g, 'I')
-      .replace(/\bteh\b/g, 'the')
-      .replace(/\brecieve\b/g, 'receive')
-      .replace(/\bdefinate\b/g, 'definite')
-      .replace(/\bseperate\b/g, 'separate');
-    corrected = corrected.replace(/(^|[.!?]\s+)([a-z])/g, (m,p1,p2)=>p1+p2.toUpperCase());
-    if (corrected && !/[.!?]$/.test(corrected.trim())) corrected += ".";
+    
+    const corrections = {
+      // Common typos
+      'teh': 'the', 'recieve': 'receive', 'seperate': 'separate',
+      'definately': 'definitely', 'occured': 'occurred', 'neccessary': 'necessary',
+      'accomodate': 'accommodate', 'begining': 'beginning', 'beleive': 'believe',
+      'calender': 'calendar', 'cemetary': 'cemetery', 'changable': 'changeable',
+      'collegue': 'colleague', 'comming': 'coming', 'commited': 'committed',
+      'concious': 'conscious', 'definite': 'definite', 'embarass': 'embarrass',
+      'enviroment': 'environment', 'existance': 'existence', 'experiance': 'experience',
+      'familar': 'familiar', 'finaly': 'finally', 'foriegn': 'foreign',
+      'goverment': 'government', 'grammer': 'grammar', 'independant': 'independent',
+      'intergrate': 'integrate', 'knowlege': 'knowledge', 'maintainance': 'maintenance',
+      'occassion': 'occasion', 'persue': 'pursue', 'priviledge': 'privilege',
+      'recomend': 'recommend', 'refered': 'referred', 'relevent': 'relevant',
+      'responsable': 'responsible', 'seperate': 'separate', 'succesful': 'successful',
+      'tommorow': 'tomorrow', 'truely': 'truly', 'untill': 'until',
+      'usefull': 'useful', 'wierd': 'weird', 'writting': 'writing'
+    };
+
+    let corrected = text;
+    
+    // Apply corrections
+    Object.entries(corrections).forEach(([wrong, right]) => {
+      const regex = new RegExp(`\\b${wrong}\\b`, 'gi');
+      corrected = corrected.replace(regex, right);
+    });
+
+    // Fix "i" to "I"
+    corrected = corrected.replace(/\bi\b/g, 'I');
+    
+    // Capitalize first letter of sentences
+    corrected = corrected.replace(/(^|[.!?]\s+)([a-z])/g, (match, p1, p2) => p1 + p2.toUpperCase());
+    
+    // Add period if missing
+    if (corrected && !/[.!?]$/.test(corrected.trim())) {
+      corrected += ".";
+    }
+    
     return corrected;
   }
 
-  // Send message to AI
-  async sendMessage(messages: AIMessage[]): Promise<AIResponse> {
-    // Add system intro if first message
-    if (!messages.some(m => m.role === 'system')) {
-      messages.unshift({
-        role: 'system',
-        content: "Hi! I am PandaNexus, built by Shakeel. I am your friendly AI assistant. How can I assist you?"
-      });
+  // Get appropriate model based on service type
+  private getModel(serviceType: string, hasImage: boolean): string {
+    if (hasImage) return this.models.image;
+    
+    switch (serviceType) {
+      case 'code': return this.models.code;
+      case 'creative': return this.models.creative;
+      case 'knowledge': return this.models.knowledge;
+      case 'general': return this.models.general;
+      default: return this.models.auto;
     }
+  }
 
-    const lastMessage = messages[messages.length - 1];
-    // Trigger image generation if prompt contains "generate image" or uploaded image exists
-    const isImage = !!lastMessage.image || /generate.*image/i.test(lastMessage.content);
-    const selectedModel = isImage ? this.models.image : this.models.general;
-
-    const formattedMessages = messages.map(msg => ({
-      role: msg.role,
-      content: msg.image ? [
-        { type: "text", text: this.localSpellFix(msg.content) },
-        { type: "image_url", image_url: { url: msg.image } }
-      ] : this.localSpellFix(msg.content)
-    }));
-
+  // Enhanced message sending with proper error handling
+  async sendMessage(messages: AIMessage[], serviceType: string = 'auto'): Promise<AIResponse> {
     try {
-      // If image generation requested, use Pollinations fallback
-      if (isImage && !lastMessage.image) {
-        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(lastMessage.content)}`;
+      const lastMessage = messages[messages.length - 1];
+      const hasImage = !!lastMessage.image;
+      const isImageGeneration = /generate.*image|create.*image|make.*image/i.test(lastMessage.content);
+      
+      // Handle image generation requests
+      if (isImageGeneration && !hasImage) {
+        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(lastMessage.content)}?width=512&height=512&seed=${Date.now()}`;
         return {
-          content: `Here’s your generated image for: ${lastMessage.content}`,
-          model: 'Pollinations',
+          content: `I've generated an image based on your request: "${lastMessage.content}"`,
+          model: 'Pollinations AI',
           imageUrl
         };
       }
+
+      const selectedModel = this.getModel(serviceType, hasImage);
+      
+      // Prepare system message based on service type
+      let systemMessage = "You are PandaNexus, an advanced AI assistant created by Shakeel. Provide helpful, accurate, and engaging responses.";
+      
+      switch (serviceType) {
+        case 'code':
+          systemMessage = "You are PandaNexus Code Assistant. Provide clean, efficient code with explanations. Focus on best practices and optimization.";
+          break;
+        case 'creative':
+          systemMessage = "You are PandaNexus Creative Assistant. Help with creative writing, brainstorming, and artistic projects with imagination and flair.";
+          break;
+        case 'knowledge':
+          systemMessage = "You are PandaNexus Knowledge Assistant. Provide accurate, well-researched information with reliable sources when possible.";
+          break;
+      }
+
+      // Format messages for API
+      const formattedMessages = [
+        { role: 'system', content: systemMessage },
+        ...messages.map(msg => ({
+          role: msg.role,
+          content: hasImage && msg.image ? [
+            { type: "text", text: this.enhancedSpellCheck(msg.content) },
+            { type: "image_url", image_url: { url: msg.image } }
+          ] : this.enhancedSpellCheck(msg.content)
+        }))
+      ];
 
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://pandanexus.dev',
+          'X-Title': 'PandaNexus AI Platform'
         },
         body: JSON.stringify({
           model: selectedModel,
           messages: formattedMessages,
-          temperature: isImage ? 0.7 : 0.3,
-          max_tokens: 1200,
-          stream: false
+          temperature: serviceType === 'creative' ? 0.8 : serviceType === 'code' ? 0.2 : 0.5,
+          max_tokens: 2000,
+          stream: false,
+          top_p: 0.9,
+          frequency_penalty: 0.1,
+          presence_penalty: 0.1
         })
       });
 
-      if (!response.ok) throw new Error(`API request failed: ${response.status}`);
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status} - ${response.statusText}`);
+      }
 
-      let imageUrl: string | undefined = undefined;
-      if (isImage && lastMessage.image) {
-        imageUrl = lastMessage.image;
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+
+      if (!content) {
+        throw new Error('No content received from API');
       }
 
       return {
-        content: data.choices?.[0]?.message?.content || lastMessage.content,
+        content: content,
         model: selectedModel,
-        imageUrl
+        imageUrl: hasImage ? lastMessage.image : undefined
       };
+
     } catch (error) {
       console.error("AIService Error:", error);
+      
+      // Fallback response
       return {
-        content: "Hi! I am PandaNexus, built by Shakeel. I am your friendly AI assistant. How can I assist you?",
-        model: selectedModel
+        content: "I'm experiencing technical difficulties right now. Please try again in a moment. If the issue persists, feel free to contact Shakeel directly.",
+        model: 'fallback'
       };
+    }
+  }
+
+  // Spell check only function
+  async spellCheck(text: string): Promise<string> {
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://pandanexus.dev',
+          'X-Title': 'PandaNexus Spell Checker'
+        },
+        body: JSON.stringify({
+          model: this.models.general,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a spell checker. Only correct spelling, grammar, and punctuation. Return ONLY the corrected text without any additional commentary.'
+            },
+            {
+              role: 'user',
+              content: `Please correct this text: ${text}`
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 500
+        })
+      });
+
+      if (!response.ok) {
+        return this.enhancedSpellCheck(text);
+      }
+
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || this.enhancedSpellCheck(text);
+    } catch (error) {
+      console.error("Spell check error:", error);
+      return this.enhancedSpellCheck(text);
     }
   }
 }
